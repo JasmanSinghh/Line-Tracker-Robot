@@ -1,0 +1,142 @@
+#pragma DebuggerWindows("DebugStream")
+const int LWH = motorC;
+const int RWH = motorA;
+int SPEED_SLOW = -5;
+const int SPEED_FAST = 30;
+
+const int COLOUR_SENSOR = S1;
+const int ULTRASOUND_SENSOR  = S3;
+
+int R,G,B;
+int average = 0;
+
+const int LIGHT_TOLERANCE = 22;
+int lastSeenColour = 0;
+// 0 - green
+// 1 - blue
+
+//Checks whether it is on a line or not. If it is, it checks whether the line is green or blue
+bool senseColour()
+{
+	getColorRGB(COLOUR_SENSOR,R,G,B);
+    //Calculate the average colour from the RGB and checks if it's less than the calibrated tolerance
+	average = (R + G + B)/ 3.0;
+	if(average < LIGHT_TOLERANCE)
+	{
+        //Checks if the line is black
+		bool isBlack = (abs(average - R) <= 2 && abs(average - G) <= 2 && abs(average - B) <= 2);
+        //If the line is neither red nor black then it must be either blue or green
+		if(R < 15 && ( G > 10 || B > 10) && !isBlack)
+		{
+			lastSeenColour = G > B ? 0 : 1;
+		}
+		return true;
+	}
+	return false;
+}
+
+//Tracks the line
+void mainLoop()
+{
+	while(true)
+	{
+        //If the robot sees an object, stop
+		if(getUSDistance(ULTRASOUND_SENSOR) <= 10)
+		{
+			setMotorSpeed(LWH, 0);
+			setMotorSpeed(RWH, 0);
+			return;
+		}
+        //If it is on a line, try to get back off the line
+		if(senseColour())
+		{
+			setMotorSpeed(LWH,SPEED_FAST);
+			setMotorSpeed(RWH,SPEED_SLOW);
+		}
+		else//Off the line trying to get back on it
+		{
+
+			setMotorSpeed(LWH,SPEED_SLOW);
+			setMotorSpeed(RWH,SPEED_FAST);
+		}
+
+	}
+}
+
+
+//Handles an obstacle when the tracker is on a blue line
+void handleBlueObstacle()
+{
+    //Makes the robot turn around by using the motor encoder to check its rotation
+	resetMotorEncoder(LWH);
+	setMotorSpeed(LWH,SPEED_FAST);
+	setMotorSpeed(RWH,-SPEED_FAST);
+	while(getMotorEncoder(LWH) < 320)
+	{
+	}
+	setMotorSpeed(LWH,0);
+	setMotorSpeed(RWH,0);
+}
+
+
+//Handles an obstacle when the tracker is on a green line
+void handleGreenObstacle()
+{
+	resetMotorEncoder(RWH);
+	setMotorSpeed(RWH, SPEED_SLOW);
+    //All the four loops are made to make sure the robot is lined up correctly with both the line and the obstacle
+	while(getMotorEncoder(RWH) > -55)//Makes the robot turn slightly to the right, as sometimes it starts too far to the left
+	{
+	}
+	setMotorSpeed(RWH, 0);
+	while(!senseColour())//Turns the robot until it is off the line
+	{
+		setMotorSpeed(LWH,SPEED_SLOW/3);
+		setMotorSpeed(RWH,SPEED_FAST/3);
+	}
+	while(senseColour())//Turns the robot until it is barely on the line
+	{
+		setMotorSpeed(RWH,SPEED_SLOW/3);
+		setMotorSpeed(LWH,SPEED_FAST/3);
+	}
+	while(getUSDistance(ULTRASOUND_SENSOR) > 4)//Move closer to the object to get it in the grasp
+	{
+		setMotorSpeed(LWH, SPEED_FAST/2);
+		setMotorSpeed(RWH, SPEED_FAST/2);
+	}
+    //Run off to the right with the obstacle
+	setMotorSpeed(LWH,0);
+	setMotorSpeed(RWH,0);
+	resetMotorEncoder(LWH);
+	setMotorTarget(LWH,360,100);
+	while(getMotorEncoder(LWH) < 360)
+	{
+	}
+    //Return to start position
+	setMotorTarget(LWH,0,100);
+	while(getMotorEncoder(LWH) > 1)
+	{
+	}
+}
+
+task main()
+{
+    //Resets the brake mode because it will sometimes start with the breaks on
+	setMotorBrakeMode(LWH, motorCoast);
+	setMotorBrakeMode(RWH,	motorCoast);
+	mainLoop();
+    //Play a tone for two seconds
+	playTone(500, 200);
+	delay(2000);
+    //Handle obstacle with the last known line colour
+	if(lastSeenColour == 1)
+	{
+		handleBlueObstacle();
+	}
+	else
+	{
+		handleGreenObstacle();
+	}
+    //Go back to tracking the line
+    mainLoop();
+}
